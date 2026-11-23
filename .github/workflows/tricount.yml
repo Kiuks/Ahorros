@@ -21,36 +21,20 @@ jobs:
           TRICOUNT_IDS: ${{ secrets.TRICOUNT_IDS }}
         run: |
           git clone --depth 1 https://github.com/wenceslas-sanchez/tricount-extractor.git /tmp/tx
-          # Si Tricount devuelve un error, mostrar su mensaje en el log (solo en caso de error)
           sed -i 's/response.raise_for_status()/(print("TRICOUNT DICE:", response.status_code, response.text[:500]) if response.is_error else None); response.raise_for_status()/' /tmp/tx/tricount_extractor/client/client.py
           cd /tmp/tx
           uv sync
-          # Probar varias versiones de la app hasta que Tricount acepte una, y usar esa
-          cat > /tmp/probar_version.py <<'EOF'
-          import re, sys, uuid
-          import httpx
-          from tricount_extractor.client.keys import generate_public_rsa_key
+          uv run python "$GITHUB_WORKSPACE/scripts/probar_version.py"
+          uv run tricount-extractor -id $TRICOUNT_IDS -f /tmp/out
 
-          URL = "https://api.tricount.bunq.com/v1/session-registry-installation"
-          clave = generate_public_rsa_key()
-          candidatas = []
-          for version in ["14.8.2", "14.0.3"]:
-              for build in [500004145, 500004150, 500004155, 500004160, 500004165,
-                            500004170, 500004180, 500004200, 500005000, 600000000]:
-                  candidatas.append(f"com.bunq.tricount.android:RELEASE:{version}:{build}:ANDROID:13:C")
+      - name: Convertir y cifrar
+        env:
+          CLAVE: ${{ secrets.CLAVE_APP }}
+        run: uv run --with openpyxl --with cryptography python scripts/tricount_a_json.py /tmp/out tricount.json
 
-          for ua in candidatas:
-              app = str(uuid.uuid4())
-              r = httpx.post(
-                  URL,
-                  json={"app_installation_uuid": app, "client_public_key": clave, "device_description": "Android"},
-                  headers={"User-Agent": ua, "app-id": app,
-                           "X-Bunq-Client-Request-Id": str(uuid.uuid4()),
-                           "Content-Type": "application/json"},
-                  timeout=30,
-              )
-              print(r.status_code, ua)
-              if r.status_code < 400:
-                  ruta = "tricount_extractor/client/client.py"
-                  codigo = open(ruta).read()
-                  codigo = re.sub(r'USER_AGENT = ".*?"', f'USER_AGENT = "{ua}"',
+      - name: Guardar
+        run: |
+          git config user.name "tricount-sync"
+          git config user.email "actions@users.noreply.github.com"
+          git add tricount.json
+          git diff --cached --quiet || (git commit -m "Sincronizar Tricount" && git push)
