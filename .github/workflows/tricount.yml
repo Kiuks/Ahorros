@@ -25,6 +25,7 @@ jobs:
           cd /tmp/tx
           uv sync
           uv run python "$GITHUB_WORKSPACE/scripts/probar_version.py"
+          mkdir -p /tmp/out
           uv run tricount-extractor -id $TRICOUNT_IDS -f /tmp/out
 
       - name: Convertir y cifrar
