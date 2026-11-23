@@ -21,6 +21,10 @@ jobs:
           TRICOUNT_IDS: ${{ secrets.TRICOUNT_IDS }}
         run: |
           git clone --depth 1 https://github.com/wenceslas-sanchez/tricount-extractor.git /tmp/tx
+          # Hacerse pasar por la versión actual de la app (el extractor dice ser la 7.0.7)
+          sed -i 's/RELEASE:7.0.7:/RELEASE:14.8.2:/' /tmp/tx/tricount_extractor/client/client.py
+          # Si Tricount devuelve un error, mostrar su mensaje en el log (solo en caso de error)
+          sed -i 's/response.raise_for_status()/(print("TRICOUNT DICE:", response.status_code, response.text[:500]) if response.is_error else None); response.raise_for_status()/' /tmp/tx/tricount_extractor/client/client.py
           cd /tmp/tx
           uv sync
           uv run tricount-extractor -id $TRICOUNT_IDS -f /tmp/out
