@@ -131,7 +131,7 @@
   <div class="total" id="left">0,00 €</div>
   <div class="prog" id="prog"><i id="progBar" style="width:0"></i></div>
   <div class="acc">
-    <div>Ahorro acumulado<br><b id="acc">0,00 €</b></div>
+    <div>Ahorrado en total<br><b id="acc">0,00 €</b></div>
     <div style="text-align:right">Si no gastas más,<br>el domingo: <b id="proj">0,00 €</b></div>
   </div>
 </header>
@@ -230,12 +230,17 @@
         <input id="budget" inputmode="decimal" autocomplete="off">
         <button class="btn inline" id="budgetSave">Guardar</button>
       </div>
-      <p class="small">El cambio vale desde esta semana. Las semanas anteriores se quedan con el presupuesto que tenían.</p>
+      <p class="small">Vale para todas las semanas, también las pasadas: si lo cambias, se recalcula el ahorro desde la semana de inicio.</p>
+    </section>
+
+    <section class="card">
+      <h2>Punto de partida</h2>
       <label for="inicio">Contar el ahorro desde la semana del</label>
-      <div class="row">
-        <input id="inicio" type="date">
-        <button class="btn inline" id="inicioSave">Guardar</button>
-      </div>
+      <input id="inicio" type="date">
+      <label for="saldo">Dinero que tenías ahorrado ese lunes</label>
+      <input id="saldo" inputmode="decimal" autocomplete="off" placeholder="0,00 €">
+      <button class="btn" id="inicioSave">Guardar</button>
+      <p class="small">Para cuadrar con el banco: pon lo que tienes hoy en el banco y elige esta semana.</p>
     </section>
 
     <section class="card">
@@ -300,7 +305,6 @@
   const KEY = 'ahorros-ines-v1';   // no cambiar: es lo que mantiene los datos entre versiones
   const SENT_KEY = 'ahorros-ines-enviado';
   const TC_KEY = 'ahorros-ines-tricount';
-  const PRESUPUESTO_INICIAL = 250;
   const $ = s => document.querySelector(s);
 
   // ---------- fechas ----------
@@ -325,7 +329,9 @@
   const fmt = n => n.toLocaleString('es-ES',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
   const fmtS = n => (n>0?'+':'')+fmt(n);
   const fmtShort = n => Math.round(n).toLocaleString('es-ES')+'€';
-  const num = s => parseFloat(String(s||'').replace(/\s|€/g,'').replace(',','.'));
+  const num = s => { let x = String(s||'').replace(/\s|€/g,'');
+    if(x.includes(',') || /^-?\d{1,3}(\.\d{3})+$/.test(x)) x = x.replace(/\./g,'');   // 1.234,56 o 2.000
+    return parseFloat(x.replace(',','.')); };
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
 
   // ---------- almacenamiento ----------
@@ -339,8 +345,15 @@
       d.inicio = iso(first ? monday(parse(first)) : thisMon());
       if(d.inicio > iso(thisMon())) d.inicio = iso(thisMon());
     }
-    if(!Array.isArray(d.presupuestos) || !d.presupuestos.length) d.presupuestos = [{desde:d.inicio, importe:PRESUPUESTO_INICIAL}];
-    d.v = 3;
+    // v5: un solo presupuesto para todas las semanas. Si viene de v4, se queda el vigente hoy
+    // (presupuestos[] se conserva sin usar, por si hay que volver a v4).
+    if(typeof d.presupuesto!=='number'){
+      const list = Array.isArray(d.presupuestos) ? d.presupuestos.filter(p => p && typeof p.importe==='number')
+        .sort((a,b)=> a.desde.localeCompare(b.desde)) : [];
+      d.presupuesto = list.length ? list[list.length-1].importe : null;   // null = sin definir: se pide en Ajustes
+    }
+    if(typeof d.saldoInicial!=='number') d.saldoInicial = 0;
+    d.v = 5;
     return d;
   }
   function save(){
@@ -426,12 +439,7 @@
 
   // ---------- cálculos ----------
   // Ahorro de una semana = presupuesto − gastos + dinero extra.
-  function budgetFor(monIso){
-    const list = data.presupuestos.slice().sort((a,b)=> a.desde.localeCompare(b.desde));
-    let v = list[0].importe;
-    list.forEach(p => { if(p.desde<=monIso) v = p.importe; });
-    return v;
-  }
+  function budgetFor(){ return typeof data.presupuesto==='number' ? data.presupuesto : 0; }
   let byDay = {};
   function indexDays(){
     byDay = {};
@@ -453,11 +461,12 @@
   function closedWeeks(){
     const out=[]; const end = iso(thisMon()); let acc=0;
     for(let d=parse(data.inicio); iso(d)<end; d=addDays(d,7)){
-      const t = weekStats(d); acc += t.ahorro; out.push({mon:new Date(d), ahorro:t.ahorro, acc});
+      const t = weekStats(d); acc += t.ahorro; out.push({mon:new Date(d), ahorro:t.ahorro, acc: data.saldoInicial + acc});
     }
     return out;
   }
-  function accumulated(){ const c = closedWeeks(); return c.length ? c[c.length-1].acc : 0; }
+  // total = saldo inicial + ahorro de las semanas cerradas desde la semana de inicio
+  function accumulated(){ const c = closedWeeks(); return c.length ? c[c.length-1].acc : data.saldoInicial; }
 
   function periods(mode){
     const out = [];
@@ -558,20 +567,17 @@
   $('#budgetSave').onclick = () => {
     const v = num($('#budget').value);
     if(!(v>=0) || isNaN(v)){ toast('Pon una cantidad válida'); return; }
-    const desde = iso(thisMon());
-    data.presupuestos = data.presupuestos.filter(p => p.desde!==desde);
-    data.presupuestos.push({desde, importe: Math.round(v*100)/100});
-    save(); render(); toast('Presupuesto guardado');
+    data.presupuesto = Math.round(v*100)/100;
+    save(); render(); toast('Presupuesto guardado (recalculado desde el inicio)');
   };
   $('#inicioSave').onclick = () => {
     const v = $('#inicio').value; if(!v){ toast('Elige una fecha'); return; }
     const nuevo = iso(monday(parse(v)));
     if(nuevo > iso(thisMon())){ toast('No puede ser una semana futura'); return; }
-    // el presupuesto más antiguo pasa a valer desde el nuevo inicio
-    const list = data.presupuestos.slice().sort((a,b)=> a.desde.localeCompare(b.desde));
-    if(nuevo < list[0].desde) list[0].desde = nuevo;
-    data.presupuestos = list; data.inicio = nuevo;
-    save(); render(); toast('Guardado: cuento desde el lunes '+parse(nuevo).getDate()+' '+MES[parse(nuevo).getMonth()]);
+    const s = String($('#saldo').value||'').trim() === '' ? 0 : num($('#saldo').value);
+    if(isNaN(s)){ toast('Pon un saldo válido'); return; }
+    data.inicio = nuevo; data.saldoInicial = Math.round(s*100)/100;
+    save(); render(); toast('Guardado: cuento desde el lunes '+parse(nuevo).getDate()+' '+MES[parse(nuevo).getMonth()]+' con '+fmt(data.saldoInicial));
   };
 
   // ---------- pintar ----------
@@ -633,8 +639,11 @@
     $('#conceptos').innerHTML = Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).slice(0,30).map(c=>`<option value="${esc(c)}">`).join('');
 
     // ajustes
-    if(document.activeElement!==$('#budget')) $('#budget').value = String(budgetFor(iso(thisMon()))).replace('.',',');
+    if(document.activeElement!==$('#budget')) $('#budget').value = typeof data.presupuesto==='number' ? String(data.presupuesto).replace('.',',') : '';
+    $('#budget').placeholder = 'Pon tu presupuesto semanal';
     if(document.activeElement!==$('#inicio')) $('#inicio').value = data.inicio;
+    if(document.activeElement!==$('#saldo')) $('#saldo').value = String(data.saldoInicial).replace('.',',');
+    if(typeof data.presupuesto!=='number') $('#leftLbl').textContent = 'Pon tu presupuesto semanal en Ajustes';
 
     drawHistory();
     drawCalendar();
@@ -735,7 +744,7 @@
     let txt = `Resumen semana ${weekLabel(mon)} ${mon.getFullYear()}\n`+
       `Presupuesto: ${fmt(t.budget)}\nGastado: ${fmt(t.g)}\n`;
     if(t.inc>0) txt += `Dinero extra: ${fmt(t.inc)}\n`;
-    txt += `${isThis?'Ahorro de la semana':'Ahorrado'}: ${fmtS(t.ahorro||0)}\nAhorro acumulado: ${fmt(accumulated() + (isThis ? (t.ahorro||0) : 0))}`;
+    txt += `${isThis?'Ahorro de la semana':'Ahorrado'}: ${fmtS(t.ahorro||0)}\nAhorrado en total: ${fmt(accumulated() + (isThis ? (t.ahorro||0) : 0))}`;
     return txt;
   }
   function updateSendLinks(){
@@ -773,9 +782,14 @@
         d.movs.forEach(m => { if(m && m.id && !ids.has(m.id) && m.fecha && m.importe>0){ data.movs.push(m); added++; } });
         if(d.emojis && typeof d.emojis==='object')
           Object.keys(d.emojis).forEach(k => { if(!data.emojis[k] && typeof d.emojis[k]==='string') data.emojis[k]=d.emojis[k]; });
-        if(Array.isArray(d.presupuestos) && d.presupuestos.length && d.inicio && d.inicio < data.inicio){
-          data.presupuestos = d.presupuestos; data.inicio = d.inicio;
+        // punto de partida (inicio + saldo) y presupuesto: solo si la copia empieza antes
+        if(d.inicio && d.inicio < data.inicio){
+          data.inicio = d.inicio;
+          if(typeof d.saldoInicial==='number') data.saldoInicial = d.saldoInicial;
+          if(typeof d.presupuesto==='number') data.presupuesto = d.presupuesto;
+          else if(Array.isArray(d.presupuestos) && d.presupuestos.length) data.presupuestos = d.presupuestos;
         }
+        if(typeof data.presupuesto!=='number' && typeof d.presupuesto==='number') data.presupuesto = d.presupuesto;
         save(); render(); updateFormEmoji();
         toast(added ? `Recuperados ${added} movimientos` : 'No había nada nuevo en la copia');
       }catch(err){ toast('Ese archivo no es una copia válida'); }
