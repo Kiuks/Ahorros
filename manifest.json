@@ -1,6 +1,6 @@
 {
-  "name": "Mi App",
-  "short_name": "Mi App",
+  "name": "VidaAdulta",
+  "short_name": "VidaAdulta",
   "start_url": "./",
   "display": "standalone",
   "icons": [
